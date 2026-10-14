@@ -77,10 +77,10 @@ def _emit_to_wolves(game: GameState, events: list[Event], kind: str, **detail) -
 def _end(game: GameState, events: list[Event], winner: Team, reason: str) -> None:
     game.winner = winner
     game.win_reason = reason
+    _emit(game, events, "game_over", winner=winner.name, reason=reason)  # 记在当前的夜/天里
     game.phase = Phase.ENDED
     game.night = None
     game.day = None
-    _emit(game, events, "game_over", winner=winner.name, reason=reason)
 
 
 def kill(game: GameState, pid: int, cause: DeathCause) -> None:
