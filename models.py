@@ -43,6 +43,16 @@ class Phase(Enum):
     ENDED = auto()
 
 
+class DayStage(Enum):
+    SHOOT = auto()  # 讨论结束后、投票之前：猎人可以开枪
+    VOTE = auto()   # 匿名投票
+
+
+class NightStage(Enum):
+    DIG = auto()    # 掘墓阶段：有尸体时才有，掘墓人比所有人早 10 秒做决定
+    MAIN = auto()   # 主阶段：所有人同时行动（好人在各自营帐，狼在公共房间一起讨论）
+
+
 class ActionKind(Enum):
     # 夜晚
     DIG = auto()           # 掘墓人：target = 要挖的尸体的座位号
@@ -100,7 +110,7 @@ class Player:
     has_bullet: bool = False
 
     # 状态：用"发生在第几夜"来记，而不是 True/False
-    # 这样毒的时间线（影响次日白天和次日夜晚准备阶段）可以算出来
+    # 第 N 夜中的毒，影响第 N 天白天和第 N+1 夜的准备阶段
     poisoned_on: Optional[int] = None
     injured_on: Optional[int] = None         # 守卫受伤的夜晚
 
@@ -133,7 +143,30 @@ class Event:
 
 
 # ---------------------------------------------------------------
-# 五、整局游戏的状态
+# 五、夜晚、白天进行中的状态
+# ---------------------------------------------------------------
+@dataclass
+class NightState:
+    """夜晚分两个阶段，每个玩家各自提交，不需要按角色排队等。"""
+    stage: NightStage = NightStage.MAIN
+    dig_subs: dict[int, list[Action]] = field(default_factory=dict)   # 掘墓阶段：座位号 -> 行动
+    subs: dict[int, list[Action]] = field(default_factory=dict)       # 主阶段：座位号 -> 行动
+    decoy: set[int] = field(default_factory=set)          # 今晚用了替身的人
+    antidote: set[int] = field(default_factory=set)       # 今晚吃了解药的人
+    prep_poisoned: set[int] = field(default_factory=set)  # 准备阶段仍在中毒的人
+    left: set[int] = field(default_factory=set)           # 今晚离开过营帐的人
+
+
+@dataclass
+class DayState:
+    """白天：讨论（由服务器计时）→ 猎人开枪 → 匿名投票。"""
+    stage: DayStage = DayStage.SHOOT
+    shots: dict[int, Optional[int]] = field(default_factory=dict)   # 猎人座位 -> 目标（None 表示不开枪）
+    votes: dict[int, Optional[int]] = field(default_factory=dict)   # 投票人 -> 目标（None 表示弃权）
+
+
+# ---------------------------------------------------------------
+# 六、整局游戏的状态
 # ---------------------------------------------------------------
 @dataclass
 class GameState:
@@ -144,8 +177,11 @@ class GameState:
     phase: Phase = Phase.NIGHT
     death_count: int = 0                     # 累计死亡人数
     graveyard: list[int] = field(default_factory=list)  # 死者座位号，按死亡顺序
-    head_vacant: bool = False                # 狼首之位是否空缺（等待接任）
+    dug: set[int] = field(default_factory=set)  # 已经被挖开过的尸体
+    vacant_head: Optional[int] = None        # 被献祭、等待接任的狼首尸体座位号；None 表示没有空缺
     left_tent: dict[int, set[int]] = field(default_factory=dict)  # 夜晚编号 -> 离开营帐的人
+    night: Optional[NightState] = None       # 夜晚进行中时才有
+    day: Optional[DayState] = None           # 白天进行中时才有
     winner: Optional[Team] = None
     win_reason: str = ""
     log: list[Event] = field(default_factory=list)
@@ -161,7 +197,7 @@ class GameState:
 
 
 # ---------------------------------------------------------------
-# 六、开局设置（v3：固定 8 人，献祭阈值 5，最多 10 天）
+# 七、开局设置（v3：固定 8 人，献祭阈值 5，最多 10 天）
 # ---------------------------------------------------------------
 STANDARD_ROLES = [
     Role.WOLF_HEAD, Role.WOLF_TAIL, Role.WOLF_TAIL,
@@ -171,11 +207,17 @@ SACRIFICE_TARGET = 5
 MAX_DAYS = 10
 
 
-def new_game(seed: Optional[int] = None) -> GameState:
-    """随机分配身份，创建一局新游戏。同一个 seed 会得到同一局。"""
+def new_game(seed: Optional[int] = None,
+             roles: Optional[list[Role]] = None) -> GameState:
+    """创建一局新游戏。
+
+    不传 roles：随机分配身份，同一个 seed 会得到同一局。
+    传入 roles：按顺序指定每个座位的身份（写测试时用）。
+    """
     rng = random.Random(seed)
-    roles = STANDARD_ROLES[:]
-    rng.shuffle(roles)
+    if roles is None:
+        roles = STANDARD_ROLES[:]
+        rng.shuffle(roles)
     players = []
     for pid, role in enumerate(roles):
         is_good = role.team == Team.GOOD
