@@ -207,8 +207,9 @@ def _validate_items(game: GameState, p: Player, actions: list[Action]) -> None:
     night = game.night
     used_tonight = (p.pid in night.decoy) or (p.pid in night.antidote)
     items = [a for a in actions if a.kind in ITEM_KINDS]
-    _check(len(items) <= 1 and not (items and used_tonight),
-           "同一晚不能同时用替身和解药")
+    if not game.rules.items_same_night:
+        _check(len(items) <= 1 and not (items and used_tonight),
+               "同一晚不能同时用替身和解药")
     for a in items:
         if a.kind == K.USE_DECOY:
             _check(p.has_decoy, "替身已经用过了")
@@ -314,6 +315,38 @@ def close_main_stage(game: GameState) -> list[Event]:
     # 1. 道具，然后确定谁仍在中毒
     _apply_items(game, good_acts)
     prep_poisoned = {p.pid for p in game.alive_players() if _still_poisoned(game, p)}
+    died: list[int] = []
+
+    # 守卫今晚去了哪里
+    guard: Optional[Player] = None
+    guard_target: Optional[int] = None
+    for a in good_acts:
+        if a.kind == K.PROTECT:
+            guard, guard_target = P[a.actor], a.target
+            if a.target != a.actor:
+                night.left.add(a.actor)
+
+    # 1.5 可选规则：守卫闯进了狼的营帐
+    if (game.rules.guard_encounter and guard is not None and guard_target != guard.pid
+            and P[guard_target].team == Team.WOLF):
+        wolf = P[guard_target]
+        frightened: Optional[Player] = None
+        if guard.pid in prep_poisoned:
+            if wolf.role == Role.WOLF_HEAD:
+                kill(game, guard.pid, DeathCause.BITTEN)   # 中毒的守卫撞上狼首：守卫死亡
+                died.append(guard.pid)
+                frightened = wolf                          # 狼首今晚也无法撕咬
+            else:
+                guard.injured_on = n                       # 狼尾趁机溜走，守卫受伤
+        else:
+            guard.injured_on = n                           # 两败俱伤：守卫明晚不能用技能
+            frightened = wolf                              # 狼被吓到，今晚缺席狼族会议
+        if guard.alive:
+            _emit(game, events, "guard_encounter", to=guard.pid, target=wolf.pid)
+        if frightened is not None:
+            _emit_to_wolves(game, events, "wolf_frightened", pid=frightened.pid)
+            wolf_acts = [a for a in wolf_acts if a.actor != frightened.pid]
+        guard_target = None                                # 守卫没有保护到任何人
 
     # 2. 狼尾接任
     for a in wolf_acts:
@@ -330,21 +363,13 @@ def close_main_stage(game: GameState) -> list[Event]:
         _end(game, events, Team.WOLF, f"献祭满 {SACRIFICE_TARGET} 具尸体，大祭司复活")
         return events
 
-    # 3. 谁离开了营帐：狼都在公共房间；守卫出去保护别人
+    # 3. 狼都去了公共房间，离开了营帐（被吓跑的狼也跑出了营帐）
     for p in game.alive_players():
         if p.team == Team.WOLF:
             night.left.add(p.pid)
-    guard: Optional[Player] = None
-    guard_target: Optional[int] = None
-    for a in good_acts:
-        if a.kind == K.PROTECT:
-            guard, guard_target = P[a.actor], a.target
-            if a.target != a.actor:
-                night.left.add(a.actor)
 
     # 4. 撕咬
     bite_target = next((a.target for a in wolf_acts if a.kind == K.BITE), None)
-    died: list[int] = []
     if bite_target is not None:
         if guard is not None and guard.alive and guard_target == bite_target:
             # 守卫去挡刀：不管被咬的人有没有用替身，守卫都会受伤
@@ -375,9 +400,12 @@ def close_main_stage(game: GameState) -> list[Event]:
             fell = a.target in night.left or a.actor in prep_poisoned
             _emit(game, events, "track_result", to=a.actor, target=a.target, leaf_fell=fell)
         elif a.kind == K.CHECK:
+            flip = a.actor in prep_poisoned                  # 女巫中毒：结论全部相反
             really = P[a.target].poisoned_on == n
-            seen = (not really) if a.actor in prep_poisoned else really
-            _emit(game, events, "check_result", to=a.actor, target=a.target, poisoned=seen)
+            detail = {"poisoned": really != flip}
+            if game.rules.witch_sees_wolf:
+                detail["is_wolf"] = (P[a.target].team == Team.WOLF) != flip
+            _emit(game, events, "check_result", to=a.actor, target=a.target, **detail)
     _emit(game, events, "dawn", deaths=died)
 
     if game.death_count >= SACRIFICE_TARGET:
@@ -469,6 +497,8 @@ def close_vote_stage(game: GameState) -> list[Event]:
     top = max(counts.values(), default=0)
     leaders = [pid for pid, c in counts.items() if c == top]
     sacrificed = leaders[0] if top > 0 and len(leaders) == 1 else None
+    if game.rules.majority_vote and top * 2 <= len(game.alive_players()):
+        sacrificed = None                              # 没有超过半数，不献祭
     _emit(game, events, "vote_result", counts=counts, sacrificed=sacrificed)
 
     if sacrificed is not None:

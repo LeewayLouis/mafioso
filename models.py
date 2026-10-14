@@ -166,12 +166,24 @@ class DayState:
 
 
 # ---------------------------------------------------------------
-# 六、整局游戏的状态
+# 六、可选规则（用来测试平衡性，全部默认关闭 = 规则文档 v3）
+# ---------------------------------------------------------------
+@dataclass
+class Rules:
+    majority_vote: bool = False     # 献祭需要得票超过活着人数的一半（刚好一半不行）
+    guard_encounter: bool = False   # 守卫闯进狼的营帐会触发"意外"
+    witch_sees_wolf: bool = False   # 女巫检测到狼会收到提示（中毒时结论相反）
+    items_same_night: bool = False  # 替身和解药可以在同一晚一起用
+
+
+# ---------------------------------------------------------------
+# 七、整局游戏的状态
 # ---------------------------------------------------------------
 @dataclass
 class GameState:
     players: list[Player]
     rng: random.Random                       # 所有随机性都从这里来，方便重现 bug
+    rules: Rules = field(default_factory=Rules)
 
     round: int = 1                           # 第几天夜（夜 r 之后是白天 r）
     phase: Phase = Phase.NIGHT
@@ -197,10 +209,14 @@ class GameState:
 
 
 # ---------------------------------------------------------------
-# 七、开局设置（v3：固定 8 人，献祭阈值 5，最多 10 天）
+# 八、开局设置（v3：固定 8 人，献祭阈值 5，最多 10 天）
 # ---------------------------------------------------------------
 STANDARD_ROLES = [
     Role.WOLF_HEAD, Role.WOLF_TAIL, Role.WOLF_TAIL,
+    Role.WITCH, Role.GUARD, Role.DETECTIVE, Role.GRAVEDIGGER, Role.HUNTER,
+]
+ONE_TAIL_ROLES = [                        # 想法 4：只有一个狼尾（7 人局）
+    Role.WOLF_HEAD, Role.WOLF_TAIL,
     Role.WITCH, Role.GUARD, Role.DETECTIVE, Role.GRAVEDIGGER, Role.HUNTER,
 ]
 SACRIFICE_TARGET = 5
@@ -208,15 +224,18 @@ MAX_DAYS = 10
 
 
 def new_game(seed: Optional[int] = None,
-             roles: Optional[list[Role]] = None) -> GameState:
+             roles: Optional[list[Role]] = None,
+             rules: Optional[Rules] = None,
+             role_set: Optional[list[Role]] = None) -> GameState:
     """创建一局新游戏。
 
-    不传 roles：随机分配身份，同一个 seed 会得到同一局。
+    不传 roles：把 role_set（默认标准 8 人）随机分给各个座位，同一个 seed 会得到同一局。
     传入 roles：按顺序指定每个座位的身份（写测试时用）。
+    rules：可选规则，不传就是规则文档 v3。
     """
     rng = random.Random(seed)
     if roles is None:
-        roles = STANDARD_ROLES[:]
+        roles = list(role_set or STANDARD_ROLES)
         rng.shuffle(roles)
     players = []
     for pid, role in enumerate(roles):
@@ -229,7 +248,7 @@ def new_game(seed: Optional[int] = None,
             has_antidote=is_good,
             has_bullet=(role == Role.HUNTER),
         ))
-    return GameState(players=players, rng=rng)
+    return GameState(players=players, rng=rng, rules=rules or Rules())
 
 
 if __name__ == "__main__":
