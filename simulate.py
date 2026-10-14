@@ -320,6 +320,9 @@ COMPARE = [
     ("1+4",                           dict(majority_vote=True), ONE_TAIL_ROLES),
     ("1+2+3+4",                       dict(majority_vote=True, guard_encounter=True,
                                            witch_sees_wolf=True), ONE_TAIL_ROLES),
+    ("v4 = 1+2+3+4+5",                dict(majority_vote=True, guard_encounter=True,
+                                           witch_sees_wolf=True, items_same_night=True),
+                                      ONE_TAIL_ROLES),
 ]
 
 

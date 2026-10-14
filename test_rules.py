@@ -66,6 +66,16 @@ def test_poisoned_guard_meets_tail_tail_slips_away():
     resolve_night(g, [Action(GUARD, K.PROTECT, TAIL2), Action(TAIL2, K.POISON, DET)])
     assert g.players[GUARD].alive and g.players[GUARD].injured_on == 2
     assert g.players[DET].poisoned_on == 2                               # 狼尾照常下毒
+    ev = g.log
+    assert not [e for e in ev if e.kind == "guard_encounter" and e.round == 2]  # 守卫没认出来
+
+
+def test_wolves_know_it_was_the_guard_but_not_who():
+    g = setup(guard_encounter=True)
+    ev = resolve_night(g, [Action(GUARD, K.PROTECT, TAIL1)])
+    told = results(ev, "attacked_by_guard", HEAD)[0]
+    assert told["pid"] == TAIL1 and told["frightened"] is True
+    assert GUARD not in told.values()
 
 
 def test_rule_off_means_nothing_happens():

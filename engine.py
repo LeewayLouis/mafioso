@@ -337,14 +337,16 @@ def close_main_stage(game: GameState) -> list[Event]:
                 died.append(guard.pid)
                 frightened = wolf                          # 狼首今晚也无法撕咬
             else:
-                guard.injured_on = n                       # 狼尾趁机溜走，守卫受伤
+                guard.injured_on = n                       # 狼尾趁机溜走，守卫受伤，什么也没认出
         else:
             guard.injured_on = n                           # 两败俱伤：守卫明晚不能用技能
             frightened = wolf                              # 狼被吓到，今晚缺席狼族会议
-        if guard.alive:
+            # 只有没中毒时，守卫才认得出这是狼族（但分不清是狼首还是狼尾）
             _emit(game, events, "guard_encounter", to=guard.pid, target=wolf.pid)
+        # 狼群只知道是守卫干的，不知道守卫是谁
+        _emit_to_wolves(game, events, "attacked_by_guard", pid=wolf.pid,
+                        frightened=frightened is not None)
         if frightened is not None:
-            _emit_to_wolves(game, events, "wolf_frightened", pid=frightened.pid)
             wolf_acts = [a for a in wolf_acts if a.actor != frightened.pid]
         guard_target = None                                # 守卫没有保护到任何人
 

@@ -219,6 +219,10 @@ ONE_TAIL_ROLES = [                        # 想法 4：只有一个狼尾（7 �
     Role.WOLF_HEAD, Role.WOLF_TAIL,
     Role.WITCH, Role.GUARD, Role.DETECTIVE, Role.GRAVEDIGGER, Role.HUNTER,
 ]
+# v4 规则：7 人局 + 献祭过半数 + 守卫意外 + 女巫识狼 + 道具可同晚使用
+V4_ROLES = ONE_TAIL_ROLES
+RULES_V4 = Rules(majority_vote=True, guard_encounter=True, witch_sees_wolf=True,
+                 items_same_night=True)
 SACRIFICE_TARGET = 5
 MAX_DAYS = 10
 
